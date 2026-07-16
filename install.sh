@@ -36,12 +36,7 @@ for argument in "$@"; do
   esac
 done
 
-if [[ "${EUID}" -eq 0 && -z "${SUDO_USER:-}" ]]; then
-  printf '%s\n' 'Do not run this script as an unqualified root login. Run it as the target user, optionally through sudo.' >&2
-  exit 1
-fi
-
-target_user="${SUDO_USER:-$USER}"
+target_user="${SUDO_USER:-${USER:-root}}"
 target_home="$(getent passwd "$target_user" | cut -d: -f6)"
 if [[ -z "$target_home" || ! -d "$target_home" ]]; then
   printf 'Cannot determine home directory for %s\n' "$target_user" >&2
@@ -58,7 +53,13 @@ as_root() {
 
 as_target_user() {
   if [[ "${EUID}" -eq 0 ]]; then
-    sudo -u "$target_user" -H "$@"
+    if [[ "$target_user" == 'root' ]]; then
+      "$@"
+    elif command -v runuser >/dev/null 2>&1; then
+      runuser -u "$target_user" -- "$@"
+    else
+      sudo -u "$target_user" -H "$@"
+    fi
   else
     "$@"
   fi
