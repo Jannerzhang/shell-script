@@ -6,6 +6,7 @@ readonly OH_MY_ZSH_GITHUB='https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/mas
 readonly OH_MY_ZSH_GITEE='https://gitee.com/pocmon/ohmyzsh/raw/master/tools/install.sh'
 readonly AUTOSUGGESTIONS_GITHUB='https://github.com/zsh-users/zsh-autosuggestions.git'
 readonly AUTOSUGGESTIONS_GITEE='https://gitee.com/chenweizhen/zsh-autosuggestions.git'
+readonly SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJcIRzVitCOlG85WZG1YGBSkLT6UvCHN83x0JLSbaE8M gz2'
 
 use_mirror=false
 install_docker=true
@@ -70,18 +71,39 @@ log() {
 }
 
 install_packages() {
-  log 'Installing zsh, git, curl and required system tools'
+  log 'Installing zsh, git, curl, unzip and required system tools'
   if command -v apt-get >/dev/null 2>&1; then
     as_root apt-get update
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y zsh git curl ca-certificates procps
+    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y zsh git curl unzip ca-certificates procps
   elif command -v dnf >/dev/null 2>&1; then
-    as_root dnf install -y zsh git curl ca-certificates procps-ng
+    as_root dnf install -y zsh git curl unzip ca-certificates procps-ng
   elif command -v yum >/dev/null 2>&1; then
-    as_root yum install -y zsh git curl ca-certificates procps-ng
+    as_root yum install -y zsh git curl unzip ca-certificates procps-ng
   else
     printf '%s\n' 'Unsupported distribution: expected apt-get, dnf, or yum.' >&2
     exit 1
   fi
+}
+
+configure_node_name() {
+  local node_name_file="$target_home/.config/shell-script/node-name"
+  local default_name entered_name node_name
+  default_name="$(hostname)"
+  entered_name="${SHELL_SCRIPT_NODE_NAME:-}"
+
+  if [[ -z "$entered_name" && -r /dev/tty ]]; then
+    printf 'Prompt display hostname (leave blank to use %s): ' "$default_name" >/dev/tty
+    IFS= read -r entered_name </dev/tty || true
+  fi
+  node_name="${entered_name:-$default_name}"
+  if [[ ! "$node_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$ ]]; then
+    printf 'Invalid display hostname: %s. Use 1-63 letters, digits, dots, underscores, or hyphens.\n' "$node_name" >&2
+    exit 1
+  fi
+
+  log "Saving prompt display hostname: $node_name"
+  as_target_user mkdir -p "$(dirname "$node_name_file")"
+  as_target_user sh -c 'umask 077; printf "%s\n" "$1" > "$2"' sh "$node_name" "$node_name_file"
 }
 
 install_oh_my_zsh() {
@@ -125,9 +147,15 @@ write_theme() {
   log 'Writing the node-info Zsh theme'
   as_target_user mkdir -p "$theme_dir"
   as_target_user sh -c "cat > '$theme_file'" <<'EOF'
-local shell_script_ip
+typeset shell_script_ip
+typeset shell_script_name
+typeset shell_script_name_file="$HOME/.config/shell-script/node-name"
+if [[ -r "$shell_script_name_file" ]]; then
+  IFS= read -r shell_script_name < "$shell_script_name_file"
+fi
+shell_script_name="${shell_script_name:-$(hostname)}"
 shell_script_ip="$(timeout 1 curl -4 -fsS --connect-timeout 1 --max-time 1 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')"
-export NODE_NAME="$(hostname)_${shell_script_ip:-unknown}"
+export NODE_NAME="${shell_script_name}_${shell_script_ip:-unknown}"
 
 PROMPT='%{$fg[magenta]%}%1{?%} %{$fg[cyan]%}%~ '
 PROMPT+='%{$fg[green]%}[%n@%{$fg_no_bold[yellow]%}$NODE_NAME%{$fg[green]%}] '
@@ -138,6 +166,19 @@ ZSH_THEME_GIT_PROMPT_SUFFIX='%{$reset_color%} '
 ZSH_THEME_GIT_PROMPT_DIRTY='%{$fg[blue]%}) %{$fg[yellow]%}%1{✗%}'
 ZSH_THEME_GIT_PROMPT_CLEAN='%{$fg[blue]%})'
 EOF
+}
+
+install_ssh_public_key() {
+  local ssh_dir="$target_home/.ssh"
+  local authorized_keys="$ssh_dir/authorized_keys"
+  log "Ensuring the managed SSH public key is authorized for $target_user"
+  as_target_user mkdir -p "$ssh_dir"
+  as_target_user chmod 700 "$ssh_dir"
+  as_target_user touch "$authorized_keys"
+  as_target_user chmod 600 "$authorized_keys"
+  if ! as_target_user grep -qxF "$SSH_PUBLIC_KEY" "$authorized_keys"; then
+    as_target_user sh -c 'printf "%s\n" "$1" >> "$2"' sh "$SSH_PUBLIC_KEY" "$authorized_keys"
+  fi
 }
 
 configure_zshrc() {
@@ -212,8 +253,10 @@ set_login_shell() {
 install_packages
 install_oh_my_zsh
 install_autosuggestions
+configure_node_name
 write_theme
 configure_zshrc
+install_ssh_public_key
 "$change_shell" && set_login_shell
 "$configure_bbr" && configure_bbr_settings
 "$install_docker" && install_docker_engine
