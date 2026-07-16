@@ -58,6 +58,8 @@ bash install.sh --skip-shell --skip-docker --skip-bbr
 SHELL_SCRIPT_NODE_NAME=bwg11 bash install.sh --skip-docker
 ```
 
+没有终端输入（例如远程批量执行）时，脚本不会尝试读取 `/dev/tty`，并会自动使用系统主机名作为提示符显示名。
+
 ## 注意事项
 
 - 普通用户执行时，脚本会在需要时请求 `sudo`。直接以 root 登录的云服务器也可执行，配置会写入 `/root` 并将 root 的登录 Shell 设为 Zsh。

@@ -131,9 +131,9 @@ configure_node_name() {
   default_name="$(hostname)"
   entered_name="${SHELL_SCRIPT_NODE_NAME:-}"
 
-  if [[ -z "$entered_name" && -r /dev/tty ]]; then
-    printf 'Prompt display hostname (leave blank to use %s): ' "$default_name" >/dev/tty
-    IFS= read -r entered_name </dev/tty || true
+  if [[ -z "$entered_name" && -t 0 && -t 1 ]]; then
+    printf 'Prompt display hostname (leave blank to use %s): ' "$default_name"
+    IFS= read -r entered_name || true
   fi
   node_name="${entered_name:-$default_name}"
   if [[ ! "$node_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$ ]]; then
