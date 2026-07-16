@@ -192,14 +192,21 @@ install_docker_engine() {
 }
 
 set_login_shell() {
-  local zsh_path
+  local zsh_path configured_shell
   zsh_path="$(command -v zsh)"
-  if [[ "$(getent passwd "$target_user" | cut -d: -f7)" == "$zsh_path" ]]; then
+  configured_shell="$(getent passwd "$target_user" | cut -d: -f7)"
+  if [[ "$configured_shell" == "$zsh_path" ]]; then
     log 'Zsh is already the login shell'
     return
   fi
   log "Changing $target_user login shell to $zsh_path"
   as_root chsh -s "$zsh_path" "$target_user"
+  configured_shell="$(getent passwd "$target_user" | cut -d: -f7)"
+  if [[ "$configured_shell" != "$zsh_path" ]]; then
+    printf 'Failed to set the login shell for %s: expected %s, got %s\n' "$target_user" "$zsh_path" "$configured_shell" >&2
+    exit 1
+  fi
+  log "Zsh is now the default login shell for $target_user"
 }
 
 install_packages
@@ -207,9 +214,9 @@ install_oh_my_zsh
 install_autosuggestions
 write_theme
 configure_zshrc
+"$change_shell" && set_login_shell
 "$configure_bbr" && configure_bbr_settings
 "$install_docker" && install_docker_engine
-"$change_shell" && set_login_shell
 
 log 'Completed successfully'
-printf 'Restart your shell with: exec zsh\n'
+printf 'Open a new SSH session to use Zsh by default, or switch now with: exec zsh\n'

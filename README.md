@@ -54,6 +54,7 @@ bash install.sh --skip-shell --skip-docker --skip-bbr
 - Docker 组有近似 root 的权限。加入该组后重新登录，或手动执行 `newgrp docker`。
 - BBR 是否可用取决于内核；脚本会打印最终状态，内核不支持时不会伪造成功。
 - 脚本可重复执行：已存在的 Oh My Zsh 会跳过安装，插件仓库会执行 fast-forward 更新。
+- 默认 Shell 设置在 Docker 与 BBR 之前完成，并会校验 `/etc/passwd` 中的实际 Shell；重新 SSH 登录后应直接进入 Zsh，当前会话可执行 `exec zsh`。
 - 这是服务器初始化脚本。请先阅读代码，再在生产服务器执行。
 
 ## 验证
