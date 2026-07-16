@@ -7,11 +7,14 @@ readonly OH_MY_ZSH_GITEE='https://gitee.com/pocmon/ohmyzsh/raw/master/tools/inst
 readonly AUTOSUGGESTIONS_GITHUB='https://github.com/zsh-users/zsh-autosuggestions.git'
 readonly AUTOSUGGESTIONS_GITEE='https://gitee.com/chenweizhen/zsh-autosuggestions.git'
 readonly SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJcIRzVitCOlG85WZG1YGBSkLT6UvCHN83x0JLSbaE8M gz2'
+readonly LOW_MEMORY_THRESHOLD_KIB=512000
+readonly SWAP_TARGET_KIB=1048576
 
 use_mirror=false
 install_docker=true
 configure_bbr=true
 change_shell=true
+configure_swap=true
 
 usage() {
   cat <<'EOF'
@@ -22,6 +25,7 @@ Options:
   --skip-docker  Do not install or start Docker.
   --skip-bbr     Do not configure fq + BBR.
   --skip-shell   Do not change the invoking user's login shell to Zsh.
+  --skip-swap    Do not create automatic swap on hosts below 500 MiB RAM.
   -h, --help     Show this help text.
 EOF
 }
@@ -32,6 +36,7 @@ for argument in "$@"; do
     --skip-docker) install_docker=false ;;
     --skip-bbr) configure_bbr=false ;;
     --skip-shell) change_shell=false ;;
+    --skip-swap) configure_swap=false ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$argument" >&2; usage >&2; exit 2 ;;
   esac
@@ -68,6 +73,41 @@ as_target_user() {
 
 log() {
   printf '\n==> %s\n' "$*"
+}
+
+ensure_low_memory_swap() {
+  local memory_kib swap_kib required_kib swap_file count_mib
+  memory_kib="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)"
+  if [[ -z "$memory_kib" || "$memory_kib" -ge "$LOW_MEMORY_THRESHOLD_KIB" ]]; then
+    log "Physical memory is ${memory_kib:-unknown} KiB; automatic swap is not required"
+    return
+  fi
+
+  swap_kib="$(awk '/^SwapTotal:/ { print $2 }' /proc/meminfo)"
+  if [[ -n "$swap_kib" && "$swap_kib" -ge "$SWAP_TARGET_KIB" ]]; then
+    log "Low-memory host detected, but ${swap_kib} KiB of swap is already available"
+    return
+  fi
+
+  required_kib=$((SWAP_TARGET_KIB - ${swap_kib:-0}))
+  swap_file='/swapfile.shell-script'
+  if [[ -e "$swap_file" ]]; then
+    printf 'Swap file %s already exists but total swap is below 1 GiB; resolve it manually or rerun with --skip-swap.\n' "$swap_file" >&2
+    exit 1
+  fi
+
+  log "Low-memory host detected (${memory_kib} KiB RAM); creating ${required_kib} KiB persistent swap"
+  if ! as_root fallocate -l "$((required_kib * 1024))" "$swap_file"; then
+    count_mib=$(((required_kib + 1023) / 1024))
+    as_root dd if=/dev/zero of="$swap_file" bs=1M count="$count_mib" status=progress
+  fi
+  as_root chmod 600 "$swap_file"
+  as_root mkswap "$swap_file"
+  as_root swapon "$swap_file"
+  if ! as_root grep -qxF "$swap_file none swap sw 0 0" /etc/fstab; then
+    printf '%s\n' "$swap_file none swap sw 0 0" | as_root tee -a /etc/fstab >/dev/null
+  fi
+  log "Persistent swap is ready; total swap: $(awk '/^SwapTotal:/ { print $2 " KiB" }' /proc/meminfo)"
 }
 
 install_packages() {
@@ -250,6 +290,7 @@ set_login_shell() {
   log "Zsh is now the default login shell for $target_user"
 }
 
+"$configure_swap" && ensure_low_memory_swap
 install_packages
 install_oh_my_zsh
 install_autosuggestions
